@@ -1,0 +1,76 @@
+# Stage 1: Base image setup
+FROM node:24-slim AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
+WORKDIR /app
+
+# Stage 2: Install all dependencies (development + production)
+FROM base AS deps
+
+# # Install the required tools for building native packages
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     build-essential \
+#     python3 \
+#     && rm -rf /var/lib/apt/lists/*
+
+
+COPY package.json pnpm-lock.yaml ./
+# Store pnpm store cache locally to speed up subsequent builds
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile \
+    --fetch-timeout=300000 \
+    --fetch-retry-maxtimeout=300000
+
+
+# NEW Stage 3: Development Environment (Supports hot-reloading)
+FROM base AS dev
+# procps provides `ps`, which @nestjs/cli's --watch mode shells out to
+# when killing the previous process tree on file changes. Without it,
+# the old server is never killed and restarts crash with EADDRINUSE.
+RUN apt-get update && apt-get install -y --no-install-recommends procps \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+COPY scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+
+
+EXPOSE 3000
+
+# Copy and set the entrypoint script
+CMD ["pnpm", "run", "start:dev"]
+
+# Stage 4: Build the application
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN pnpm run build
+# Prune development dependencies to keep production footprint tiny
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm prune --prod
+
+# Stage 5: Production Runner
+FROM node:24-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Create a non-root user for security
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nestjs
+
+# Copy pruned production node_modules and built dist files
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./package.json
+COPY scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+
+USER nestjs
+ENTRYPOINT ["/entrypoint.sh"]
+EXPOSE 3000
+ENV PORT=3000
+
+CMD ["node", "dist/main"]

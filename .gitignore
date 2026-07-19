@@ -1,0 +1,6 @@
+node_modules/
+.env
+
+# pnpm is the only supported package manager — never commit other lockfiles
+package-lock.json
+yarn.lock

@@ -1,0 +1,60 @@
+services:
+  frontend-dev:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    volumes:
+      - ./frontend:/app
+      -  /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+    networks:
+      - frontend-net
+      - backend-net
+
+  backend-dev:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./backend:/app
+      -  /app/node_modules
+    environment:
+      - NODE_ENV=development
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-net
+
+  db:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    env_file: .env
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend-net
+
+networks:
+  frontend-net:
+    driver: bridge
+  backend-net:
+    driver: bridge
+
+volumes:
+  pgdata_dev:
