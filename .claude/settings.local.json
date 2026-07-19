@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Read(//home/smokeybull/**)",
-      "Bash(docker compose *)"
-    ]
-  }
-}
